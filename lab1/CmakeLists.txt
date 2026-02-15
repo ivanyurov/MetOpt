@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.10)
+project(SimplexMethod LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_compile_options(-Wall -Wextra)
+
+option(BUILD_TESTS "Build test executable" ON)
+
+set(LIB_SOURCES
+    src/Utils.cpp
+    src/Matrix.cpp
+    src/SimplexEngine.cpp
+    src/TaskLoader.cpp
+    src/TaskModel.cpp
+)
+
+add_library(simplex_lib STATIC ${LIB_SOURCES})
+target_include_directories(simplex_lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(simplex_lib PUBLIC m)
+
+if(BUILD_TESTS)
+    add_executable(simplex_test
+        main.cpp
+    )
+    target_link_libraries(simplex_test simplex_lib)
+endif()

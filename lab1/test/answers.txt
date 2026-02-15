@@ -1,0 +1,12 @@
+test1 err
+test2 0 2 0 0 0 0 28 1 : -2
+test3 0 35/13 85/13 0 0 3/13 337/13 309/13 : -3/13
+test4 13/7 0 0 5/7 2 0 81/7 100/7 : -71/7
+test5 err Unbounded
+test6 err Matrix rank
+test7 0 10 0 5 7 0 5 4 : 5
+test8 2 6 0 7 8 0 0 5 : -11
+test9 err Unbounded
+test10 : -94
+
+input 0 2 0 3 0 1 14 33 : 2
