@@ -56,5 +56,6 @@ private:
     vector<double> find_initial_basic_solution(vector<Constraint> &);
 
 public:
+    std::vector<std::vector<double>> enumerate_vertices(LPProblem &problem, bool logs = false) const;
     LPProblemSolution &solve(LPProblem &problem, bool logs = false, vector<double> support = vector<double>(0)) override;
 };

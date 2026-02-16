@@ -6,10 +6,11 @@
 using std::vector;
 
 template <typename T>
-std::vector<T> subtract_vectors(std::vector<T> a, std::vector<T> b)
+std::vector<T> subtract_vectors(const std::vector<T> &a, const std::vector<T> &b)
 {
     std::vector<T> res;
-    for (int i = 0; i < a.size(); i++)
+    res.reserve(a.size());
+    for (size_t i = 0; i < a.size(); ++i)
     {
         if (std::find(b.begin(), b.end(), a[i]) == b.end())
         {
@@ -22,22 +23,22 @@ std::vector<T> subtract_vectors(std::vector<T> a, std::vector<T> b)
 template <typename T>
 std::vector<T> concatenate_vectors(const std::vector<T> &vec1, const std::vector<T> &vec2)
 {
-    vector<T> result;
-    for (auto &el : vec1)
-    {
+    std::vector<T> result;
+    result.reserve(vec1.size() + vec2.size());
+    for (const auto &el : vec1)
         result.push_back(el);
-    }
-    for (auto &el : vec2)
-    {
+    for (const auto &el : vec2)
         result.push_back(el);
-    }
-    std::sort(result.begin(), result.end());
+    // Не сортируем по умолчанию: порядок индексов важен для соответствия колонок.
     return result;
 }
 
+// Генерация всех сочетаний (комбинаций) size n из elements
 void generate_combinations(const std::vector<int> &elements, int n, size_t start,
                            std::vector<int> &current, std::vector<std::vector<int>> &result);
 
+// Удобная оболочка
 std::vector<std::vector<int>> combinations(const std::vector<int> &elements, int n);
 
+// Печать вектора int
 void print_vector(const std::vector<int> &a);

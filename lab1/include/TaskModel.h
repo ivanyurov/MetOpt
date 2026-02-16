@@ -1,6 +1,8 @@
 #pragma once
 
 #include <vector>
+#include <memory>
+
 using std::vector;
 
 enum class ObjectiveType
@@ -8,12 +10,14 @@ enum class ObjectiveType
     MINIMIZE,
     MAXIMIZE
 };
+
 enum class InequalityType
 {
     LESS_EQUAL,
     GREATER_EQUAL,
     EQUAL
 };
+
 enum class BoundType
 {
     NOT_NEGATIVE,
@@ -21,77 +25,92 @@ enum class BoundType
     NO
 };
 
-// Ограничение вида: a1*x1 + ... + an*xn ≤/≥/= b
+// Ограничение: a1*x1 + ... + an*xn <=/>=/= b
 struct Constraint
 {
     vector<double> coefficients;
-    double b;
-    InequalityType type;
+    double b = 0.0;
+    InequalityType type = InequalityType::EQUAL;
 };
 
-// Ограничение на знак компоненты решения
+// Граничное условие на переменную (component — 1-based индекс)
 struct VariableBound
 {
-    int component;
-    BoundType type;
+    int component = 0;
+    BoundType type = BoundType::NO;
 };
 
-// Базовый класс задачи ЛП
 class LPProblem
 {
 public:
-    int n;
-    int to_max = 1;
+    int n = 0;      // число переменных (текущий размер векторов objective/коэффициентов)
+    int to_max = 1; // 1 = original as-is, -1 = original was MAX and was negated
 
-    ObjectiveType objective_type;
+    ObjectiveType objective_type = ObjectiveType::MINIMIZE;
     vector<double> objective;
     vector<Constraint> constraints;
     vector<VariableBound> bounds;
+
     LPProblem();
     LPProblem(int n);
-    LPProblem(LPProblem &problem);
+    LPProblem(const LPProblem &other);
     LPProblem(vector<double> objective, ObjectiveType objective_type = ObjectiveType::MINIMIZE);
+    virtual ~LPProblem() = default;
+
     void set_solution_dim(int n);
     void set_objective(const std::vector<double> &coeffs, ObjectiveType type);
     void add_constraint(const Constraint &c);
     void add_var_bound(const VariableBound &vb);
-    void print_problem();
-    vector<double> get_objective();
-    vector<Constraint> get_constraints();
+    void print_problem() const;
 
-    virtual std::vector<double> get_initial_solution(vector<double> solution) = 0;
+    std::vector<double> get_objective() const;
+    std::vector<Constraint> get_constraints() const;
+
+    virtual std::vector<double> get_initial_solution(std::vector<double> solution) = 0;
     virtual void convert() = 0;
-    virtual LPProblem &dual() = 0;
+    virtual std::unique_ptr<LPProblem> dual() = 0;
+    virtual void to_standard_form() = 0;
 };
 
-// Общая задача ЛП
+// Общая (general) форма
 class LPProblemGeneral : public LPProblem
 {
 public:
+    std::vector<std::pair<int, int>> bounds_to_subtract; // (original_index_0based, negative_part_index_0based)
+    std::vector<int> negated_vars;
+    int initial_dim = 0;
     using LPProblem::LPProblem;
 
-    // Converts base linear problem to general
+    LPProblemGeneral(const LPProblemGeneral &other)
+        : LPProblem(other),
+          bounds_to_subtract(other.bounds_to_subtract),
+          initial_dim(other.initial_dim)
+    {
+    }
+
     void convert() override;
-
-    std::vector<double> get_initial_solution(vector<double> solution) override;
-
-    // Converts general linear problem to its dual
-    LPProblem &dual() override;
+    std::vector<double> get_initial_solution(std::vector<double> solution) override;
+    std::unique_ptr<LPProblem> dual() override;
+    void to_standard_form() override;
 };
 
-// Каноническая задача ЛП
+// Каноническая (slack) форма
 class LPProblemSlack : public LPProblemGeneral
 {
 public:
-    std::vector<std::pair<int, int>> bounds_to_substract;
-    int initial_dim = 0;
+    using LPProblemGeneral::bounds_to_subtract;
+    using LPProblemGeneral::initial_dim;
+
+    // Конструктор копирования — НЕ копируем локальное поле (его больше нет!)
+    LPProblemSlack(const LPProblemSlack &other)
+        : LPProblemGeneral(other) // базовый класс скопирует bounds_to_subtract
+    {
+        // initial_dim уже скопирован через базовый класс
+    }
+
     using LPProblemGeneral::LPProblemGeneral;
-    // Converts base (or general) linear problem to slack
+
     void convert() override;
-
-    // Returns solution vector to initial dim
-    std::vector<double> get_initial_solution(vector<double> solution) override;
-
-    // Converts slack linear problem to its dual
-    LPProblem &dual() override;
+    std::vector<double> get_initial_solution(std::vector<double> solution) override;
+    std::unique_ptr<LPProblem> dual() override;
 };

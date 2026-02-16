@@ -4,11 +4,12 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <memory>
 
 class LPProblemParser
 {
 public:
-	static LPProblemSlack *parse(const std::string &filename);
+	static std::unique_ptr<LPProblem> parse(const std::string &filename);
 
 private:
 	static std::vector<std::string> split(const std::string &s);

@@ -1,6 +1,9 @@
-#include <iterator>
 #include <iostream>
 #include "../include/TaskModel.h"
+#include <stdexcept>
+#include <algorithm>
+#include <iomanip>
+
 using std::cout;
 using std::endl;
 
@@ -14,16 +17,19 @@ LPProblem::LPProblem(int n)
     this->n = n;
 }
 
-LPProblem::LPProblem(LPProblem &problem)
+LPProblem::LPProblem(const LPProblem &problem)
 {
-    this->n = problem.objective.size();
-    this->objective = problem.objective;
+    this->n = problem.n;
+    this->to_max = problem.to_max;
     this->objective_type = problem.objective_type;
+    this->objective = problem.objective;
+    this->constraints = problem.constraints;
+    this->bounds = problem.bounds;
 }
 
 LPProblem::LPProblem(vector<double> objective, ObjectiveType objective_type)
 {
-    this->n = objective.size();
+    this->n = static_cast<int>(objective.size());
     this->objective = objective;
     this->objective_type = objective_type;
 }
@@ -37,303 +43,502 @@ void LPProblem::set_objective(const std::vector<double> &coeffs, ObjectiveType t
 {
     objective = coeffs;
     objective_type = type;
+    n = static_cast<int>(objective.size());
 }
 
 void LPProblem::add_constraint(const Constraint &c)
 {
+    if (!objective.empty() && static_cast<int>(c.coefficients.size()) != n)
+        throw std::runtime_error("add_constraint: coefficients size != n");
     constraints.push_back(c);
 }
 
 void LPProblem::add_var_bound(const VariableBound &vb)
 {
+    if (vb.component < 1)
+        throw std::runtime_error("add_var_bound: component must be >= 1");
+    // We allow adding bounds even if n not set yet; validation will occur on convert or later
     bounds.push_back(vb);
 }
 
-void LPProblem::print_problem()
+void LPProblem::print_problem() const
 {
-    cout << "Problem of " << ((objective_type == ObjectiveType::MINIMIZE) ? "Minimization\n" : "Maximization\n") << endl;
-    cout << "Objective:" << endl;
-    for (int i = 0; i < objective.size(); i++)
+    cout << "Problem of " << ((objective_type == ObjectiveType::MINIMIZE) ? "Minimization" : "Maximization") << "\n";
+    cout << "Objective:\n";
+
+    // Печатаем коэффициент с явным знаком, но индекс без знака:
+    for (int i = 0; i < static_cast<int>(objective.size()); ++i)
     {
-        if (i != 0 && objective[i] >= 0)
-        {
-            cout << "+ ";
-        }
-        cout << objective[i] << "x" << i + 1 << " ";
+        // Печатать знак только для коэффициента:
+        cout << std::showpos << objective[i] << std::noshowpos;
+        cout << "x" << (i + 1) << " ";
     }
     cout << "\n\n";
 
-    cout << "Constraints:" << endl;
-    for (auto &constraint : constraints)
+    cout << "Constraints:\n";
+    for (const auto &c : constraints)
     {
-        for (int i = 0; i < constraint.coefficients.size(); i++)
+        for (int i = 0; i < static_cast<int>(c.coefficients.size()); ++i)
         {
-            if (i != 0 && constraint.coefficients[i] >= 0)
-            {
-                cout << "+ ";
-            }
-            cout << constraint.coefficients[i] << "x" << i + 1 << " ";
+            cout << std::showpos << c.coefficients[i] << std::noshowpos;
+            cout << "x" << (i + 1) << " ";
         }
-        if (constraint.type == InequalityType::LESS_EQUAL)
-            cout << "<= " << constraint.b;
-        else if (constraint.type == InequalityType::GREATER_EQUAL)
-            cout << ">= " << constraint.b;
-        else if (constraint.type == InequalityType::EQUAL)
-            cout << "= " << constraint.b;
-        cout << "\n\n";
-    }
-
-    cout << "Bounds:" << endl;
-    for (auto &bound : bounds)
-    {
-        if (bound.type != BoundType::NO)
-        {
-            cout << "x" << bound.component << (bound.type == BoundType::NOT_NEGATIVE ? " >= 0" : " <= 0") << endl;
-        }
+        if (c.type == InequalityType::LESS_EQUAL)
+            cout << "<= ";
+        else if (c.type == InequalityType::GREATER_EQUAL)
+            cout << ">= ";
         else
-        {
-            cout << "x" << bound.component << endl;
-        }
+            cout << "= ";
+
+        cout << c.b << "\n";
     }
-    cout << "\n\n";
+    cout << "\nBounds:\n";
+    cout << "\nBounds:\n";
+    for (const auto &b : bounds)
+    {
+        cout << "x" << b.component;
+        if (b.type == BoundType::NOT_NEGATIVE)
+            cout << " >= 0";
+        else if (b.type == BoundType::NOT_POSITIVE)
+            cout << " <= 0";
+        else // BoundType::NO
+            cout << " free";
+        cout << "\n";
+    }
+    cout << std::noshowpos << "\n";
 }
 
-vector<double> LPProblem::get_objective()
+std::vector<double> LPProblem::get_objective() const
 {
     return objective;
 }
 
-vector<Constraint> LPProblem::get_constraints()
+std::vector<Constraint> LPProblem::get_constraints() const
 {
     return constraints;
 }
 
+//
+// LPProblemGeneral
+//
+
 void LPProblemGeneral::convert()
 {
-    // Objective generalization
+    // 1) MAX -> MIN
     if (objective_type == ObjectiveType::MAXIMIZE)
     {
-        for (auto &component : objective)
-        {
-            component *= -1;
-        }
-        this->to_max = -1;
+        for (auto &v : objective)
+            v *= -1;
         objective_type = ObjectiveType::MINIMIZE;
+        to_max = -1;
     }
 
-    // Constraint generalization
-    for (auto &constraint : constraints)
+    // 2) <= -> >=
+    for (auto &c : constraints)
     {
-        if (constraint.type == InequalityType::LESS_EQUAL)
+        if (c.type == InequalityType::LESS_EQUAL)
         {
-            for (auto &component : constraint.coefficients)
-            {
-                component *= -1;
-            }
-            constraint.b *= -1;
-            constraint.type = InequalityType::GREATER_EQUAL;
+            for (auto &coef : c.coefficients)
+                coef *= -1;
+            c.b *= -1;
+            c.type = InequalityType::GREATER_EQUAL;
         }
     }
 
-    // Bound generalization
-    for (auto &bound : bounds)
+    // 3) x <= 0 -> -x >= 0
+    for (auto &b : bounds)
     {
-        if (bound.type == BoundType::NOT_POSITIVE)
+        if (b.type == BoundType::NOT_POSITIVE)
         {
-            bound.type = BoundType::NOT_NEGATIVE;
-            int component = bound.component - 1;
+            int idx = b.component - 1;
+            if (idx < 0 || idx >= static_cast<int>(objective.size()))
+                continue;
 
-            // Modifying constraints
-            for (auto &constraint : constraints)
+            negated_vars.push_back(idx); // ← ЗАПОМИНАЕМ индекс
+
+            b.type = BoundType::NOT_NEGATIVE;
+            for (auto &c : constraints)
             {
-                constraint.coefficients[component] *= -1;
+                if (idx < static_cast<int>(c.coefficients.size()))
+                    c.coefficients[idx] *= -1;
             }
-
-            // Modifying objective
-            objective[component] *= -1;
+            objective[idx] *= -1;
         }
     }
-    if (bounds.size() < n)
+
+    // 4) add explicit NO bounds if missing
+    for (int i = 1; i <= n; ++i)
     {
-        bool fl = false;
-        for (int i = 1; i <= n; i++)
-        {
-            for (auto &bound : bounds)
+        bool found = false;
+        for (const auto &b : bounds)
+            if (b.component == i)
             {
-                if (bound.component == i)
+                found = true;
+                break;
+            }
+        if (!found)
+            bounds.push_back({i, BoundType::NO});
+    }
+}
+
+// Также обнови get_initial_solution в LPProblemGeneral (чтобы работало восстановление после standard form)
+std::vector<double> LPProblemGeneral::get_initial_solution(std::vector<double> solution)
+{
+    std::vector<double> ans(initial_dim, 0.0);
+    for (int i = 0; i < initial_dim; ++i)
+        ans[i] = solution[i];
+
+    // 1. Восстанавливаем свободные переменные (x = x⁺ - x⁻)
+    for (const auto &p : bounds_to_subtract)
+    {
+        if (p.second < static_cast<int>(solution.size()))
+            ans[p.first] -= solution[p.second];
+    }
+
+    // 2. Восстанавливаем переменные, бывшие NOT_POSITIVE (x = -x')
+    for (int idx : negated_vars)
+    {
+        if (idx < static_cast<int>(ans.size()))
+            ans[idx] *= -1.0; // ← КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ!
+    }
+
+    // 3. Учёт исходного знака (если была максимизация)
+    for (auto &v : ans)
+        v *= to_max;
+
+    return ans;
+}
+
+std::unique_ptr<LPProblem> LPProblemGeneral::dual()
+{
+    // Работаем с КОПИЕЙ без вызова convert() — сохраняем исходные типы ограничений!
+    LPProblemGeneral copy = *this;
+
+    int m = static_cast<int>(copy.constraints.size());
+    int nvars = copy.n;
+
+    auto dual = std::make_unique<LPProblemGeneral>(m);
+
+    // objective = b (правые части прямой задачи)
+    std::vector<double> dual_obj(m);
+    for (int i = 0; i < m; ++i)
+        dual_obj[i] = copy.constraints[i].b;
+    dual->set_objective(dual_obj, ObjectiveType::MAXIMIZE);
+
+    // bounds for dual variables — КРИТИЧЕСКИ ВАЖНО: учитываем ИСХОДНЫЙ тип ограничения!
+    for (int i = 0; i < m; ++i)
+    {
+        VariableBound vb;
+        vb.component = i + 1;
+
+        // Для задачи МИНИМИЗАЦИИ:
+        //   >=  → двойственная переменная >= 0
+        //   <=  → двойственная переменная <= 0   ← ЭТО БЫЛО УТЕРЯНО!
+        //   =   → двойственная переменная свободна
+        if (copy.constraints[i].type == InequalityType::GREATER_EQUAL)
+            vb.type = BoundType::NOT_NEGATIVE; // y_i >= 0
+        else if (copy.constraints[i].type == InequalityType::LESS_EQUAL)
+            vb.type = BoundType::NOT_POSITIVE; // y_i <= 0  ← ИСПРАВЛЕНО!
+        else                                   // EQUAL
+            vb.type = BoundType::NO;           // y_i free
+
+        dual->add_var_bound(vb);
+    }
+
+    // constraints of dual — для каждой переменной прямой задачи
+    for (int j = 0; j < nvars; ++j)
+    {
+        Constraint dc;
+        dc.coefficients.resize(m);
+        for (int i = 0; i < m; ++i)
+        {
+            if (j < static_cast<int>(copy.constraints[i].coefficients.size()))
+                dc.coefficients[i] = copy.constraints[i].coefficients[j];
+            else
+                dc.coefficients[i] = 0.0;
+        }
+        if (j < static_cast<int>(copy.objective.size()))
+            dc.b = copy.objective[j];
+        else
+            dc.b = 0.0;
+
+        // Тип ограничения двойственной задачи зависит от границ переменной прямой задачи
+        dc.type = InequalityType::EQUAL;
+        for (const auto &pb : copy.bounds)
+        {
+            if (pb.component - 1 == j)
+            {
+                if (pb.type == BoundType::NOT_NEGATIVE)      // x_j >= 0
+                    dc.type = InequalityType::LESS_EQUAL;    // для максимизации: a^T y <= c_j
+                else if (pb.type == BoundType::NOT_POSITIVE) // x_j <= 0
+                    dc.type = InequalityType::GREATER_EQUAL; // для максимизации: a^T y >= c_j
+                else                                         // x_j свободна
+                    dc.type = InequalityType::EQUAL;         // a^T y = c_j
+                break;
+            }
+        }
+
+        dual->add_constraint(dc);
+    }
+
+    return dual;
+}
+
+void LPProblemGeneral::to_standard_form()
+{
+    // Сохраняем исходную размерность для восстановления решения
+    if (initial_dim == 0)
+        initial_dim = n;
+
+    // 1. Max → Min
+    if (objective_type == ObjectiveType::MAXIMIZE)
+    {
+        for (auto &coef : objective)
+            coef *= -1.0;
+        objective_type = ObjectiveType::MINIMIZE;
+        to_max = -1;
+    }
+
+    // 2. <= → >= (переворачиваем знаки)
+    for (auto &c : constraints)
+    {
+        if (c.type == InequalityType::LESS_EQUAL)
+        {
+            for (auto &coef : c.coefficients)
+                coef *= -1.0;
+            c.b *= -1.0;
+            c.type = InequalityType::GREATER_EQUAL;
+        }
+    }
+
+    // 3. x <= 0 → x >= 0 (переворачиваем коэффициенты переменной)
+    for (auto &b : bounds)
+    {
+        if (b.type == BoundType::NOT_POSITIVE)
+        {
+            int idx = b.component - 1;
+            if (idx >= 0 && idx < n)
+            {
+                b.type = BoundType::NOT_NEGATIVE;
+                for (auto &c : constraints)
                 {
-                    fl = true;
-                    break;
+                    if (idx < static_cast<int>(c.coefficients.size()))
+                        c.coefficients[idx] *= -1.0;
                 }
+                objective[idx] *= -1.0;
             }
-
-            if (!fl)
-            {
-                bounds.push_back({i, BoundType::NO});
-            }
-            fl = false;
         }
     }
-}
 
-std::vector<double> LPProblemGeneral::get_initial_solution(vector<double> solution)
-{
-    for (auto& el : solution){
-        el *= to_max;
-    }
-    return solution;
-}
-
-LPProblem &LPProblemGeneral::dual()
-{
-    LPProblemGeneral::convert();
-
-    int m = constraints.size();
-    LPProblemGeneral *dual_problem = new LPProblemGeneral(m);
-
-    vector<double> dual_objective;
-    for (int i = 0; i < m; i++)
+    // 4. Добавляем недостающие bounds (все переменные должны иметь bound)
+    for (int i = 1; i <= n; ++i)
     {
-        dual_objective.push_back(constraints[i].b);
-
-        VariableBound dual_bound;
-        if (constraints[i].type == InequalityType::GREATER_EQUAL)
+        bool has_bound = false;
+        for (const auto &b : bounds)
         {
-            dual_bound.component = i + 1;
-            dual_bound.type = BoundType::NOT_NEGATIVE;
+            if (b.component == i)
+            {
+                has_bound = true;
+                break;
+            }
+        }
+        if (!has_bound)
+            bounds.push_back({i, BoundType::NO});
+    }
+
+    // 5. Собираем свободные переменные заранее
+    std::vector<int> free_var_indices;
+    for (const auto &b : bounds)
+    {
+        if (b.type == BoundType::NO)
+            free_var_indices.push_back(b.component - 1);
+    }
+
+    // 6. Расщепляем свободные переменные x = x+ - x-
+    for (int orig_idx : free_var_indices)
+    {
+        if (orig_idx < 0 || orig_idx >= n)
+            continue;
+
+        // Оригинальная становится x+ >= 0
+        for (auto &b : bounds)
+        {
+            if (b.component - 1 == orig_idx)
+            {
+                b.type = BoundType::NOT_NEGATIVE;
+                break;
+            }
+        }
+
+        // Добавляем x- >= 0
+        bounds.push_back({n + 1, BoundType::NOT_NEGATIVE});
+        bounds_to_subtract.push_back({orig_idx, n});
+
+        // Столбец x- = -столбец оригинальной
+        for (auto &c : constraints)
+        {
+            double orig_coef = (orig_idx < static_cast<int>(c.coefficients.size())) ? c.coefficients[orig_idx] : 0.0;
+            c.coefficients.push_back(-orig_coef);
+        }
+
+        // Коэффициент в цели для x- = -коэффициент оригинальной
+        double orig_obj = (orig_idx < static_cast<int>(objective.size())) ? objective[orig_idx] : 0.0;
+        objective.push_back(-orig_obj);
+
+        ++n;
+    }
+
+    // 7. Расщепляем равенства = на два >=
+    std::vector<Constraint> new_constraints;
+    new_constraints.reserve(constraints.size() * 2);
+
+    for (const auto &c : constraints)
+    {
+        if (c.type == InequalityType::EQUAL)
+        {
+            // >= b
+            Constraint positive = c;
+            positive.type = InequalityType::GREATER_EQUAL;
+            new_constraints.push_back(positive);
+
+            // >= -b (перевёрнутое)
+            Constraint negative = c;
+            for (auto &coef : negative.coefficients)
+                coef *= -1.0;
+            negative.b *= -1.0;
+            negative.type = InequalityType::GREATER_EQUAL;
+            new_constraints.push_back(negative);
         }
         else
         {
-            dual_bound.component = i + 1;
-            dual_bound.type = BoundType::NO;
+            // Уже >= — оставляем как есть (b может быть < 0)
+            new_constraints.push_back(c);
         }
-        dual_problem->add_var_bound(dual_bound);
-    }
-    for (int i = 0; i < n; i++)
-    {
-        Constraint dual_constraint;
-
-        for (int j = 0; j < m; j++)
-        {
-            dual_constraint.coefficients.push_back(constraints[j].coefficients[i]);
-        }
-        for (auto &bound : bounds)
-        {
-            if (bound.component - 1 == i)
-            {
-                if (bound.type == BoundType::NOT_NEGATIVE)
-                {
-                    dual_constraint.type = InequalityType::LESS_EQUAL;
-                    break;
-                }
-                else
-                {
-                    dual_constraint.type = InequalityType::EQUAL;
-                    break;
-                }
-            }
-        }
-        dual_constraint.b = objective[i];
-
-        dual_problem->add_constraint(dual_constraint);
     }
 
-    dual_problem->set_objective(dual_objective, ObjectiveType::MAXIMIZE);
-
-    return *dual_problem;
+    constraints = std::move(new_constraints);
 }
 
 void LPProblemSlack::convert()
 {
-    LPProblemGeneral::convert();
+    // LPProblemGeneral::convert();
+
     if (initial_dim == 0)
-    {
         initial_dim = n;
-    }
 
-    // Handling no-sign solution components
-    for (int i = 0; i < bounds.size(); i++)
+    // 2. Расщепляем свободные переменные: x = x⁺ - x⁻
+    std::vector<int> free_vars;
+    for (const auto &b : bounds)
+        if (b.type == BoundType::NO)
+            free_vars.push_back(b.component - 1);
+
+    for (int idx : free_vars)
     {
-        if (bounds[i].type == BoundType::NO)
-        {
-            int component = bounds[i].component - 1;
+        if (idx < 0 || idx >= n)
+            continue;
 
-            bounds[i].type = BoundType::NOT_NEGATIVE;
-            bounds.push_back({n + 1, BoundType::NOT_NEGATIVE});
-            bounds_to_substract.push_back({bounds[i].component - 1, n});
-            n += 1;
-            // Modifying constraints
-            for (auto &constraint : constraints)
+        // Оригинальная переменная становится x⁺ >= 0
+        for (auto &b : bounds)
+            if (b.component - 1 == idx)
             {
-                constraint.coefficients.push_back(-constraint.coefficients[component]);
+                b.type = BoundType::NOT_NEGATIVE;
+                break;
             }
 
-            // Modifying objective
-            objective.push_back(-objective[component]);
+        // Добавляем x⁻ >= 0
+        bounds_to_subtract.push_back({idx, n});
+
+        for (auto &c : constraints)
+        {
+            double coef = (idx < static_cast<int>(c.coefficients.size()))
+                              ? c.coefficients[idx]
+                              : 0.0;
+            c.coefficients.push_back(-coef);
         }
+
+        objective.push_back(-objective[idx]);
+        bounds.push_back({n + 1, BoundType::NOT_NEGATIVE});
+        ++n;
     }
 
-    // Handling inequality constraints
-    for (int i = 0; i < constraints.size(); i++)
+    // 3. Добавляем slack-переменные для преобразования неравенств в равенства
+    // Для >=: aᵀx >= b  →  aᵀx - s = b  (s >= 0)
+    // Для <=: aᵀx <= b  →  aᵀx + s = b  (s >= 0)
+    int m = static_cast<int>(constraints.size());
+    for (int i = 0; i < m; ++i)
     {
-        if (constraints[i].type == InequalityType::GREATER_EQUAL)
+        if (constraints[i].type == InequalityType::GREATER_EQUAL ||
+            constraints[i].type == InequalityType::LESS_EQUAL)
         {
-            constraints[i].type = InequalityType::EQUAL;
-            for (int j = 0; j < constraints.size(); j++)
+            // Добавляем столбец для новой slack-переменной
+            for (int j = 0; j < m; ++j)
             {
-                if (j != i)
+                if (j == i)
                 {
-                    constraints[j].coefficients.push_back(0);
+                    // Для >=: коэффициент -1; для <=: коэффициент +1
+                    double slack_coef = (constraints[i].type == InequalityType::GREATER_EQUAL)
+                                            ? -1.0
+                                            : 1.0;
+                    constraints[j].coefficients.push_back(slack_coef);
                 }
                 else
                 {
-                    constraints[j].coefficients.push_back(-1);
+                    constraints[j].coefficients.push_back(0.0);
                 }
             }
+
+            objective.push_back(0.0);
             bounds.push_back({n + 1, BoundType::NOT_NEGATIVE});
-            objective.push_back(0);
-            n += 1;
+            ++n;
+
+            // Преобразуем в равенство
+            constraints[i].type = InequalityType::EQUAL;
         }
     }
-    // constraints where b < 0 ()=>*=-1
-    for (int i = 0; i < constraints.size(); i++)
+
+    // 4. Нормализуем правые части: обеспечиваем b >= 0
+    // Если b < 0, умножаем всё уравнение на -1
+    for (auto &c : constraints)
     {
-        if (constraints[i].b < 0)
+        if (c.b < 0)
         {
-            for (int j = 0; j < constraints[i].coefficients.size(); j++)
-            {
-                constraints[i].coefficients[j] *= -1;
-            }
-            constraints[i].b *= -1;
+            for (auto &coef : c.coefficients)
+                coef *= -1.0;
+            c.b *= -1.0;
+            // Тип остаётся EQUAL, знаки коэффициентов изменены
         }
     }
 }
 
-LPProblem &LPProblemSlack::dual()
+std::unique_ptr<LPProblem> LPProblemSlack::dual()
 {
-    LPProblem &dual_problem = LPProblemGeneral::dual();
-    LPProblemSlack *dual_problem_slack = new LPProblemSlack(dual_problem.objective, dual_problem.objective_type);
+    auto base_dual = LPProblemGeneral::dual();
+    auto dual_slack = std::make_unique<LPProblemSlack>(base_dual->get_objective(), base_dual->objective_type);
 
-    for (auto &constr : dual_problem.constraints)
-    {
-        dual_problem_slack->add_constraint(constr);
-    }
-    for (auto &b : dual_problem.bounds)
-    {
-        dual_problem_slack->add_var_bound(b);
-    }
+    for (const auto &c : base_dual->get_constraints())
+        dual_slack->add_constraint(c);
+    for (const auto &b : base_dual->bounds)
+        dual_slack->add_var_bound(b);
 
-    return *dual_problem_slack;
+    return dual_slack;
 }
 
-vector<double> LPProblemSlack::get_initial_solution(vector<double> solution){
-    vector<double> ans(initial_dim);
-    for (int i = 0; i < initial_dim; i++){
+std::vector<double> LPProblemSlack::get_initial_solution(std::vector<double> solution)
+{
+    if (static_cast<int>(solution.size()) < n)
+        throw std::runtime_error("get_initial_solution: solution size too small");
+
+    std::vector<double> ans(initial_dim, 0.0);
+    for (int i = 0; i < initial_dim; ++i)
         ans[i] = solution[i];
+
+    for (const auto &p : bounds_to_subtract)
+    {
+        if (p.first >= 0 && p.first < static_cast<int>(ans.size()) && p.second >= 0 && p.second < static_cast<int>(solution.size()))
+            ans[p.first] -= solution[p.second];
+        else
+            throw std::runtime_error("get_initial_solution: index out of range");
     }
-    for (auto& p : bounds_to_substract){
-        ans[p.first] -= solution[p.second];
-    }
-   
+
     return ans;
 }

@@ -4,7 +4,7 @@
 void generate_combinations(const std::vector<int> &elements, int n, size_t start,
                            std::vector<int> &current, std::vector<std::vector<int>> &result)
 {
-    if (current.size() == n)
+    if ((int)current.size() == n)
     {
         result.push_back(current);
         return;
@@ -21,6 +21,7 @@ void generate_combinations(const std::vector<int> &elements, int n, size_t start
 std::vector<std::vector<int>> combinations(const std::vector<int> &elements, int n)
 {
     std::vector<std::vector<int>> result;
+    if (n <= 0 || (size_t)n > elements.size()) return result;
     std::vector<int> current;
     generate_combinations(elements, n, 0, current, result);
     return result;
@@ -28,10 +29,10 @@ std::vector<std::vector<int>> combinations(const std::vector<int> &elements, int
 
 void print_vector(const std::vector<int> &a)
 {
-    for (auto &j : a)
+    for (size_t i = 0; i < a.size(); ++i)
     {
-        std::cout << j << " ";
+        std::cout << a[i];
+        if (i + 1 < a.size()) std::cout << " ";
     }
-    std::cout << "\n"
-              << std::endl;
+    std::cout << "\n";
 }

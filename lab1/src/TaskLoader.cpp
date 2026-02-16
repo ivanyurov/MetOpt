@@ -80,7 +80,7 @@ int isSubstring(string s1, string s2)
 	return -1;
 }
 
-LPProblemSlack *LPProblemParser::parse(const string &filename)
+std::unique_ptr<LPProblem> LPProblemParser::parse(const string &filename)
 {
 	ifstream file(filename);
 	if (!file)
@@ -159,7 +159,7 @@ LPProblemSlack *LPProblemParser::parse(const string &filename)
 
 
 	// Create problem
-	LPProblemSlack *problem = new LPProblemSlack(n);
+	auto problem = std::make_unique<LPProblemSlack>(n);
 	problem->set_objective(c, objType);
 	for (const auto &con : constraints)
 	{

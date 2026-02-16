@@ -11,136 +11,158 @@ using namespace std;
 // Конструкторы
 Matrix::Matrix(const vector<vector<double>> &matrix)
 {
-    this->matrix = matrix;
-    n = matrix.size();
-    m = matrix[0].size();
-    for (int i = 0; i < n; i++)
-        line_indexes.push_back(i);
-    for (int j = 0; j < m; j++)
-        column_indexes.push_back(j);
+    if (matrix.empty()) {
+        this->matrix = matrix;
+        n = 0;
+        m = 0;
+    } else {
+        this->matrix = matrix;
+        n = matrix.size();
+        m = matrix[0].size();
+    }
+    line_indexes.clear();
+    column_indexes.clear();
+    for (size_t i = 0; i < n; ++i) line_indexes.push_back((int)i);
+    for (size_t j = 0; j < m; ++j) column_indexes.push_back((int)j);
 }
 
 Matrix::Matrix(const vector<double> &vect)
 {
-    for (auto &el : vect)
-    {
+    matrix.clear();
+    for (double el : vect)
         matrix.push_back(vector<double>(1, el));
-    }
 
     n = matrix.size();
-    m = matrix[0].size();
-    for (int i = 0; i < n; i++)
-    {
-        line_indexes.push_back(i);
-    }
-    for (int j = 0; j < m; j++)
-    {
-        column_indexes.push_back(j);
-    }
+    m = (n == 0 ? 0 : matrix[0].size());
+    line_indexes.clear();
+    column_indexes.clear();
+    for (size_t i = 0; i < n; ++i) line_indexes.push_back((int)i);
+    for (size_t j = 0; j < m; ++j) column_indexes.push_back((int)j);
 }
 
-// Операция транспонирования
-Matrix &Matrix::transpose()
+// Транспонирование (возвращаем новую матрицу)
+Matrix Matrix::transpose() const
 {
+    if (n == 0 || m == 0) return Matrix(std::vector<std::vector<double>>{});
     vector<vector<double>> t_matrix(m, vector<double>(n));
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < m; j++)
-        {
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < m; ++j)
             t_matrix[j][i] = matrix[i][j];
-        }
-    }
-    Matrix *ret = new Matrix(t_matrix);
-    ret->set_columns(line_indexes);
-    ret->set_lines(column_indexes);
-    return *ret;
+
+    Matrix ret(t_matrix);
+    std::vector<int> new_columns(line_indexes.begin(), line_indexes.end());
+    std::vector<int> new_lines(column_indexes.begin(), column_indexes.end());
+    ret.set_columns(new_columns);
+    ret.set_lines(new_lines);
+    return ret;
 }
 
-// Вывод матрицы
-void Matrix::print()
+// Вывод матрицы (только активная подматрица)
+void Matrix::print() const
 {
     cout << endl;
-    for (auto &line_ind : line_indexes)
+    for (size_t i = 0; i < line_indexes.size(); ++i)
     {
-        for (auto &col_ind : column_indexes)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
         {
-            std::cout << matrix[line_ind][col_ind] << " ";
+            cout << matrix[line_indexes[i]][column_indexes[j]] << " ";
         }
-        std::cout << std::endl;
+        cout << std::endl;
     }
     cout << "\n";
 }
 
 // Установка индексов столбцов и строк
-void Matrix::set_columns(vector<int> columns)
+void Matrix::set_columns(const std::vector<int> &columns)
 {
     column_indexes = columns;
 }
 
-void Matrix::set_lines(vector<int> lines)
+void Matrix::set_lines(const std::vector<int> &lines)
 {
     line_indexes = lines;
 }
 
-// Выделение подматрицы
-Matrix &Matrix::allocate_matrix(vector<int> lines, vector<int> columns)
+// Выделение подматрицы (возвращаем новую матрицу)
+Matrix Matrix::allocate_matrix(const std::vector<int> &lines, const std::vector<int> &columns) const
 {
-    vector<vector<double>> new_matrix(lines.size(), vector<double>(columns.size()));
-    for (size_t i = 0; i < lines.size(); i++)
+    if (lines.empty() || columns.empty())
+        return Matrix(std::vector<std::vector<double>>{});
+
+    vector<vector<double>> new_matrix(lines.size(), vector<double>(columns.size(), 0.0));
+    for (size_t i = 0; i < lines.size(); ++i)
     {
-        for (size_t j = 0; j < columns.size(); j++)
+        for (size_t j = 0; j < columns.size(); ++j)
         {
-            new_matrix[i][j] = matrix[lines[i]][columns[j]];
+            int li = lines[i];
+            int cj = columns[j];
+            if (li < 0 || (size_t)li >= (size_t)matrix.size() || cj < 0 || (size_t)cj >= (size_t)matrix[0].size())
+                throw std::out_of_range("allocate_matrix: index out of range");
+            new_matrix[i][j] = matrix[li][cj];
         }
     }
-    Matrix *ret = new Matrix(new_matrix);
-    return *ret;
+    Matrix ret(new_matrix);
+    return ret;
 }
 
-// Умножение матриц
-Matrix &Matrix::multiply(const Matrix &a)
+// Умножение активной подматрицы this (rows=line_indexes, cols=column_indexes)
+// на активную подматрицу a (rows=a.line_indexes, cols=a.column_indexes).
+Matrix Matrix::multiply(const Matrix &a) const
 {
-    vector<vector<double>> result(line_indexes.size(), vector<double>(a.column_indexes.size(), 0));
+    size_t lhs_rows = line_indexes.size();
+    size_t lhs_cols = column_indexes.size();
+    size_t rhs_rows = a.line_indexes.size();
+    size_t rhs_cols = a.column_indexes.size();
 
-    for (int i = 0; i < line_indexes.size(); i++)
+    if (lhs_cols != rhs_rows)
+        throw std::invalid_argument("multiply: incompatible dimensions");
+
+    vector<vector<double>> result(lhs_rows, vector<double>(rhs_cols, 0.0));
+
+    for (size_t i = 0; i < lhs_rows; ++i)
     {
-        vector<double> line = matrix[line_indexes[i]];
-        for (int k = 0; k < a.column_indexes.size(); k++)
+        for (size_t k = 0; k < rhs_cols; ++k)
         {
-
-            for (int j = 0; j < column_indexes.size(); j++)
+            double sum = 0.0;
+            for (size_t j = 0; j < lhs_cols; ++j)
             {
-                result[i][k] += (line[column_indexes[j]] * a.matrix[a.line_indexes[j]][a.column_indexes[k]]);
+                double left_val = matrix[line_indexes[i]][column_indexes[j]];
+                double right_val = a.matrix[a.line_indexes[j]][a.column_indexes[k]];
+                sum += left_val * right_val;
             }
+            result[i][k] = sum;
         }
     }
-    Matrix *ans = new Matrix(result);
-    return *ans;
+
+    Matrix ans(result);
+    return ans;
 }
 
-Matrix &Matrix::get_inverse_matrix()
+Matrix Matrix::get_inverse_matrix() const
 {
-    if (line_indexes.size() == 0 || line_indexes.size() != column_indexes.size())
+    size_t sz = line_indexes.size();
+    if (sz == 0 || sz != column_indexes.size())
     {
-        throw std::invalid_argument("Matrix must be square");
+        throw std::invalid_argument("Matrix must be square (active submatrix)");
     }
-    vector<vector<double>> augmented(line_indexes.size(), vector<double>(2 * line_indexes.size(), 0));
 
-    for (size_t i = 0; i < line_indexes.size(); ++i)
+    vector<vector<double>> augmented(sz, vector<double>(2 * sz, 0.0));
+    for (size_t i = 0; i < sz; ++i)
     {
-        for (size_t j = 0; j < column_indexes.size(); ++j)
+        for (size_t j = 0; j < sz; ++j)
         {
             augmented[i][j] = matrix[line_indexes[i]][column_indexes[j]];
         }
-        augmented[i][i + line_indexes.size()] = 1;
+        augmented[i][i + sz] = 1.0;
     }
 
-    for (size_t i = 0; i < line_indexes.size(); ++i)
+    for (size_t i = 0; i < sz; ++i)
     {
+        // Правильный проход по строкам (а не по column_indexes)
         size_t max_row = i;
-        for (size_t k = i + 1; k < column_indexes.size(); ++k)
+        for (size_t k = i + 1; k < sz; ++k)
         {
-            if (abs(augmented[k][i]) > abs(augmented[max_row][i]))
+            if (std::fabs(augmented[k][i]) > std::fabs(augmented[max_row][i]))
             {
                 max_row = k;
             }
@@ -151,23 +173,23 @@ Matrix &Matrix::get_inverse_matrix()
             std::swap(augmented[i], augmented[max_row]);
         }
 
-        if (augmented[i][i] == 0)
+        if (std::fabs(augmented[i][i]) < 1e-14)
         {
             throw std::invalid_argument("Matrix is singular and cannot be inverted");
         }
 
         double pivot = augmented[i][i];
-        for (size_t j = 0; j < 2 * line_indexes.size(); ++j)
+        for (size_t j = 0; j < 2 * sz; ++j)
         {
             augmented[i][j] = (augmented[i][j] / pivot);
         }
 
-        for (size_t k = 0; k < line_indexes.size(); ++k)
+        for (size_t k = 0; k < sz; ++k)
         {
             if (k != i)
             {
                 double factor = augmented[k][i];
-                for (size_t j = 0; j < 2 * line_indexes.size(); ++j)
+                for (size_t j = 0; j < 2 * sz; ++j)
                 {
                     augmented[k][j] -= factor * augmented[i][j];
                 }
@@ -175,319 +197,243 @@ Matrix &Matrix::get_inverse_matrix()
         }
     }
 
-    vector<vector<double>> inverse(line_indexes.size(), vector<double>(line_indexes.size(), 0));
-    for (size_t i = 0; i < line_indexes.size(); ++i)
+    vector<vector<double>> inverse(sz, vector<double>(sz, 0));
+    for (size_t i = 0; i < sz; ++i)
     {
-        for (size_t j = 0; j < column_indexes.size(); ++j)
+        for (size_t j = 0; j < sz; ++j)
         {
-            inverse[i][j] = augmented[i][j + line_indexes.size()];
+            inverse[i][j] = augmented[i][j + sz];
         }
     }
 
-    Matrix *inversed_matrix = new Matrix(inverse);
-
-    return *inversed_matrix;
+    Matrix inversed_matrix(inverse);
+    return inversed_matrix;
 }
 
-// Детерминант (рекурсивная реализация)
-double Matrix::determinant(vector<vector<double>> matrix)
+double Matrix::determinant(const vector<vector<double>> &mat) const
 {
-    if (matrix.size() == 0 || matrix[0].size() != matrix.size())
-    {
-        throw std::invalid_argument("Matrix must be square");
-    }
+    size_t sz = mat.size();
+    if (sz == 0 || mat[0].size() != sz)
+        throw std::invalid_argument("determinant: matrix must be square and non-empty");
 
-    if (matrix.size() == 1)
-    {
-        return matrix[0][0];
-    }
+    if (sz == 1) return mat[0][0];
+    if (sz == 2) return mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
 
-    if (matrix.size() == 2)
+    double det = 0.0;
+    for (size_t col = 0; col < sz; ++col)
     {
-        return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
-    }
-
-    if (matrix.size() == 3)
-    {
-        return matrix[0][0] * matrix[1][1] * matrix[2][2] +
-               matrix[0][1] * matrix[1][2] * matrix[2][0] +
-               matrix[0][2] * matrix[1][0] * matrix[2][1] -
-               matrix[0][2] * matrix[1][1] * matrix[2][0] -
-               matrix[0][0] * matrix[1][2] * matrix[2][1] -
-               matrix[0][1] * matrix[1][0] * matrix[2][2];
-    }
-
-    double det = 0;
-    for (size_t col = 0; col < matrix.size(); ++col)
-    {
-        vector<vector<double>> submatrix(matrix.size() - 1, vector<double>(matrix.size() - 1));
-        for (size_t i = 1; i < matrix.size(); ++i)
+        vector<vector<double>> sub(sz - 1, vector<double>(sz - 1));
+        for (size_t i = 1; i < sz; ++i)
         {
             size_t subcol = 0;
-            for (size_t j = 0; j < matrix.size(); ++j)
+            for (size_t j = 0; j < sz; ++j)
             {
-                if (j == col)
-                    continue;
-                submatrix[i - 1][subcol] = matrix[i][j];
-                subcol++;
+                if (j == col) continue;
+                sub[i - 1][subcol++] = mat[i][j];
             }
         }
-
-        double minor = determinant(submatrix);
-        det += (col % 2 == 0 ? 1 : -1) * matrix[0][col] * minor;
+        double minor = determinant(sub);
+        det += ((col % 2 == 0) ? 1.0 : -1.0) * mat[0][col] * minor;
     }
-
     return det;
 }
 
-// Операции сравнения
-bool Matrix::operator==(const Matrix &rhs)
+bool Matrix::operator==(const Matrix &rhs) const
 {
     if (line_indexes.size() != rhs.line_indexes.size() ||
         column_indexes.size() != rhs.column_indexes.size())
         return false;
 
     for (size_t i = 0; i < line_indexes.size(); ++i)
-    {
         for (size_t j = 0; j < column_indexes.size(); ++j)
-        {
             if (matrix[line_indexes[i]][column_indexes[j]] !=
                 rhs.matrix[rhs.line_indexes[i]][rhs.column_indexes[j]])
-            {
                 return false;
-            }
-        }
-    }
+
     return true;
 }
 
-bool Matrix::operator!=(const Matrix &rhs)
-{
-    return !(*this == rhs);
-}
+bool Matrix::operator!=(const Matrix &rhs) const { return !(*this == rhs); }
 
-// Остальные операторы и методы
-Matrix &Matrix::subtract(Matrix &a)
-{
-    vector<vector<double>> ans(line_indexes.size(), vector<double>(column_indexes.size()));
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            ans[i][j] = std::round((matrix[line_indexes[i]][column_indexes[j]] - a.matrix[a.line_indexes[i]][a.column_indexes[j]]) * 10000000) / 10000000;
-        }
-    }
-    Matrix *ret = new Matrix(ans);
-    return *ret;
-}
-
-// Операторы сравнения с числами
-bool Matrix::operator>(double num)
-{
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            if (matrix[line_indexes[i]][column_indexes[j]] <= num)
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool Matrix::operator<(double num)
-{
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            if (matrix[line_indexes[i]][column_indexes[j]] >= num)
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool Matrix::operator<(const Matrix &rhs)
+bool Matrix::operator<(const Matrix &rhs) const
 {
     if (rhs.line_indexes.size() != line_indexes.size() || column_indexes.size() != rhs.column_indexes.size())
-    {
         return false;
-    }
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            if (matrix[line_indexes[i]][column_indexes[j]] >= rhs.matrix[rhs.line_indexes[i]][rhs.column_indexes[j]])
-            {
+
+    for (size_t i = 0; i < line_indexes.size(); ++i)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
+            if (!(matrix[line_indexes[i]][column_indexes[j]] < rhs.matrix[rhs.line_indexes[i]][rhs.column_indexes[j]]))
                 return false;
-            }
-        }
-    }
+
     return true;
 }
 
-// Умножение на скаляр
-Matrix &Matrix::operator*(double num)
+Matrix Matrix::subtract(const Matrix &a) const
 {
-    for (int i = 0; i < line_indexes.size(); i++)
+    size_t rows = line_indexes.size();
+    size_t cols = column_indexes.size();
+    if (rows != a.line_indexes.size() || cols != a.column_indexes.size())
+        throw std::invalid_argument("subtract: incompatible sizes");
+
+    vector<vector<double>> ans(rows, vector<double>(cols, 0.0));
+    for (size_t i = 0; i < rows; ++i)
     {
-        for (int j = 0; j < column_indexes.size(); j++)
+        for (size_t j = 0; j < cols; ++j)
         {
-            matrix[line_indexes[i]][column_indexes[j]] *= num;
+            double left = matrix[line_indexes[i]][column_indexes[j]];
+            double right = a.matrix[a.line_indexes[i]][a.column_indexes[j]];
+            ans[i][j] = std::round((left - right) * 10000000.0) / 10000000.0;
         }
     }
-    return *this;
+    return Matrix(ans);
 }
 
-bool Matrix::operator<=(double num)
+bool Matrix::operator>(double num) const
 {
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            if (matrix[line_indexes[i]][column_indexes[j]] > num)
-            {
+    for (size_t i = 0; i < line_indexes.size(); ++i)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
+            if (!(matrix[line_indexes[i]][column_indexes[j]] > num))
                 return false;
-            }
-        }
-    }
-    return true;
-}
-bool Matrix::operator>=(double num)
-{
-    for (int i = 0; i < line_indexes.size(); i++)
-    {
-        for (int j = 0; j < column_indexes.size(); j++)
-        {
-            if (matrix[line_indexes[i]][column_indexes[j]] < num)
-            {
-                return false;
-            }
-        }
-    }
     return true;
 }
 
-// Дополнительные методы
-vector<int> Matrix::get_addition_to_square_matrix(vector<int> &available_indexes)
+bool Matrix::operator<(double num) const
 {
+    for (size_t i = 0; i < line_indexes.size(); ++i)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
+            if (!(matrix[line_indexes[i]][column_indexes[j]] < num))
+                return false;
+    return true;
+}
 
-    int need_to_add = line_indexes.size() - column_indexes.size();
+Matrix Matrix::operator*(double num) const
+{
+    vector<vector<double>> out = matrix;
+    for (size_t i = 0; i < out.size(); ++i)
+        for (size_t j = 0; j < out[0].size(); ++j)
+            out[i][j] *= num;
+    return Matrix(out);
+}
+
+bool Matrix::operator<=(double num) const
+{
+    for (size_t i = 0; i < line_indexes.size(); ++i)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
+            if (!(matrix[line_indexes[i]][column_indexes[j]] <= num))
+                return false;
+    return true;
+}
+
+bool Matrix::operator>=(double num) const
+{
+    for (size_t i = 0; i < line_indexes.size(); ++i)
+        for (size_t j = 0; j < column_indexes.size(); ++j)
+            if (!(matrix[line_indexes[i]][column_indexes[j]] >= num))
+                return false;
+    return true;
+}
+
+std::vector<int> Matrix::get_addition_to_square_matrix(const std::vector<int> &available_indexes)
+{
+    int need_to_add = (int)line_indexes.size() - (int)column_indexes.size();
     if (need_to_add <= 0)
     {
         return column_indexes;
     }
-    vector<vector<int>> combs = combinations(available_indexes, need_to_add);
+
+    auto combs = combinations(available_indexes, need_to_add);
     for (auto &comb : combs)
     {
-
-        if (determinant(
-                allocate_matrix(
-                    line_indexes,
-                    concatenate_vectors<int>(column_indexes, comb))
-                    .matrix) != 0)
+        auto candidate_cols = concatenate_vectors<int>(column_indexes, comb);
+        Matrix sub = allocate_matrix(line_indexes, candidate_cols);
+        double det = determinant(sub.matrix);
+        if (std::fabs(det) > 1e-12)
         {
-
-            set_columns(concatenate_vectors<int>(column_indexes, comb));
-
+            set_columns(candidate_cols);
             return column_indexes;
         }
     }
+    return std::vector<int>{};
 }
 
-int Matrix::column_size()
+int Matrix::column_size() const
 {
-    if (matrix.empty())
-        return 0;
-    return matrix[0].size();
+    if (matrix.empty()) return 0;
+    return (int)matrix[0].size();
 }
 
 void Matrix::gaussian_elimination()
 {
-    int rank = 0;
-    for (size_t col = 0; col < column_indexes.size() && rank < line_indexes.size(); ++col)
+    size_t rows = line_indexes.size();
+    size_t cols = column_indexes.size();
+    size_t r = 0;
+
+    for (size_t c = 0; c < cols && r < rows; ++c)
     {
-        // Поиск строки с максимальным элементом в текущем столбце
-        size_t max_row = rank;
-        for (size_t row = rank + 1; row < line_indexes.size(); ++row)
+        size_t pivot_row = r;
+        double max_val = std::fabs(matrix[line_indexes[pivot_row]][column_indexes[c]]);
+        for (size_t i = r + 1; i < rows; ++i)
         {
-            if (abs(matrix[line_indexes[row]][column_indexes[col]]) >
-                abs(matrix[line_indexes[max_row]][column_indexes[col]]))
+            double val = std::fabs(matrix[line_indexes[i]][column_indexes[c]]);
+            if (val > max_val)
             {
-                max_row = row;
+                max_val = val;
+                pivot_row = i;
             }
         }
 
-        // Если максимальный элемент равен нулю, пропускаем столбец
-        if (matrix[line_indexes[max_row]][column_indexes[col]] == 0)
+        if (std::fabs(matrix[line_indexes[pivot_row]][column_indexes[c]]) < 1e-14)
         {
             continue;
         }
 
-        // Меняем строки местами
-        if (max_row != rank)
+        if (pivot_row != r)
+            std::swap(line_indexes[pivot_row], line_indexes[r]);
+
+        double pivot = matrix[line_indexes[r]][column_indexes[c]];
+        for (size_t j = c; j < cols; ++j)
         {
-            std::swap(line_indexes[max_row], line_indexes[rank]);
+            matrix[line_indexes[r]][column_indexes[j]] /= pivot;
         }
 
-        // Нормализация текущей строки
-        double pivot = matrix[line_indexes[rank]][column_indexes[col]];
-        for (size_t j = col; j < column_indexes.size(); ++j)
+        for (size_t i = r + 1; i < rows; ++i)
         {
-            matrix[line_indexes[rank]][column_indexes[j]] /= pivot;
-        }
-
-        // Обнуление элементов ниже текущего
-        for (size_t row = rank + 1; row < line_indexes.size(); ++row)
-        {
-            double factor = matrix[line_indexes[row]][column_indexes[col]];
-            for (size_t j = col; j < column_indexes.size(); ++j)
+            double factor = matrix[line_indexes[i]][column_indexes[c]];
+            for (size_t j = c; j < cols; ++j)
             {
-                matrix[line_indexes[row]][column_indexes[j]] -=
-                    factor * matrix[line_indexes[rank]][column_indexes[j]];
+                matrix[line_indexes[i]][column_indexes[j]] -= factor * matrix[line_indexes[r]][column_indexes[j]];
             }
         }
 
-        // Увеличиваем ранг
-        rank++;
+        ++r;
     }
 }
 
-int Matrix::compute_rank()
+int Matrix::compute_rank() const
 {
-    // Создаем копию матрицы, чтобы не изменять оригинальную
-    Matrix temp(*this);
+    Matrix temp = *this;
     temp.gaussian_elimination();
 
-    // Подсчет ненулевых строк
     int rank = 0;
-    for (size_t row = 0; row < temp.line_indexes.size(); ++row)
+    for (size_t i = 0; i < temp.line_indexes.size(); ++i)
     {
-        bool is_non_zero = false;
-        for (size_t col = 0; col < temp.column_indexes.size(); ++col)
+        bool nonzero = false;
+        for (size_t j = 0; j < temp.column_indexes.size(); ++j)
         {
-            if (temp.matrix[temp.line_indexes[row]][temp.column_indexes[col]] != 0)
+            if (std::fabs(temp.matrix[temp.line_indexes[i]][temp.column_indexes[j]]) > 1e-12)
             {
-                is_non_zero = true;
+                nonzero = true;
                 break;
             }
         }
-        if (is_non_zero)
-        {
-            rank++;
-        }
+        if (nonzero) ++rank;
     }
     return rank;
 }
 
-bool Matrix::is_full_rank()
+bool Matrix::is_full_rank() const
 {
     int rank = compute_rank();
-    int min_dim = std::min(line_indexes.size(), column_indexes.size());
+    int min_dim = (int)std::min(line_indexes.size(), column_indexes.size());
     return rank == min_dim;
 }
